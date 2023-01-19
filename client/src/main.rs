@@ -56,10 +56,14 @@ async fn run(server: &str, port: u16, certificate_path: &Path) -> Result<Infalli
             .context("Read timed out")??;
         match message {
             Message::Event(event) => {
-                log::info!("Handle {:?}", event);
+                log::debug!("Handle {:?}", event);
                 writer.write(event).await?
             },
             Message::KeepAlive => {}
+            Message::Notify(msg) => {
+                log::debug!("Notify {:?}", msg);
+                writer.notify(msg)?;
+            }
         }
     }
 }

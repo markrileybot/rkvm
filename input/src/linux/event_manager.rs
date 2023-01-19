@@ -71,6 +71,10 @@ impl EventManager {
     pub async fn write(&mut self, event: Event) -> Result<(), Error> {
         self.writer.write(event).await
     }
+
+    pub fn notify(&mut self, message: String) -> Result<(), Error> {
+        self.writer.notify(message)
+    }
 }
 
 async fn spawn_reader(
@@ -93,7 +97,7 @@ async fn spawn_reader(
 
     let reader = match EventReader::open(&path).await {
         Ok(reader) => reader,
-        Err(OpenError::Io(err)) => return Err(err),
+        Err(OpenError::Io(err)) => return Err(Error::new(err.kind(), format!("Failed to open {}.  {}", path.display(), err))),
         Err(OpenError::AlreadyOpened) => return Ok(()),
     };
 

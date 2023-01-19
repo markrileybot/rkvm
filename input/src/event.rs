@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 pub enum Event {
     MouseScroll { delta: i32 },
     MouseMove { axis: Axis, delta: i32 },
-    Key { direction: Direction, kind: KeyKind },
+    Key { direction: Direction, kind: KeyKind }
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]

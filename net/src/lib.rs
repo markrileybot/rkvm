@@ -59,9 +59,10 @@ where
     Ok(())
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Message {
     Event(Event),
     // Sent only to keep the connection alive.
     KeepAlive,
+    Notify(String),
 }

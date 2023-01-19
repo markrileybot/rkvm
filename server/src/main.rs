@@ -20,10 +20,10 @@ use tokio_native_tls::native_tls::{Identity, TlsAcceptor};
 
 async fn handle_connection<T>(
     mut stream: T,
-    mut receiver: UnboundedReceiver<Event>,
+    mut receiver: UnboundedReceiver<Message>,
 ) -> Result<(), Error>
-where
-    T: AsyncRead + AsyncWrite + Unpin,
+    where
+        T: AsyncRead + AsyncWrite + Unpin,
 {
     net::write_version(&mut stream, PROTOCOL_VERSION).await?;
 
@@ -39,7 +39,7 @@ where
     loop {
         // Send a keep alive message in intervals of half of the timeout just to be on the safe side.
         let message = match time::timeout(net::MESSAGE_TIMEOUT / 2, receiver.recv()).await {
-            Ok(Some(message)) => Message::Event(message),
+            Ok(Some(message)) => message,
             Ok(None) => return Ok(()),
             Err(_) => Message::KeepAlive,
         };
@@ -48,8 +48,8 @@ where
             net::MESSAGE_TIMEOUT,
             net::write_message(&mut stream, &message),
         )
-        .await
-        .context("Write timeout")??;
+            .await
+            .context("Write timeout")??;
     }
 }
 
@@ -108,7 +108,7 @@ async fn run(
         }
     });
 
-    let mut clients: Vec<UnboundedSender<Event>> = Vec::new();
+    let mut clients: Vec<UnboundedSender<Message>> = Vec::new();
     let mut current = 0;
     let mut manager = EventManager::new().await?;
     let mut switch_key_states: HashMap<_, _> = switch_keys
@@ -139,6 +139,16 @@ async fn run(
 
                     current = (current + 1) % (clients.len() + 1);
                     log::info!("Switching to client {}", current);
+
+                    if current == 0 {
+                        manager.notify("I'm over here now!".to_string())?;
+                    } else {
+                        if let Err(e) = clients[current - 1].send(Message::Notify("I'm over here now!".to_string())) {
+                            log::warn!("{:?}", e);
+                        } else {
+                            log::debug!("Notify client {}", current);
+                        }
+                    }
                     continue;
                 } else if kill_key_states.iter().filter(|(_, state)| **state).count() == kill_key_states.len() {
                     for state in kill_key_states.values_mut() {
@@ -149,7 +159,7 @@ async fn run(
 
                 if current != 0 {
                     let idx = current - 1;
-                    if let Err(e) = clients[idx].send(event) {
+                    if let Err(e) = clients[idx].send(Message::Event(event)) {
                         log::warn!("{:?}.  Removing client {}", e, current);
                         clients.remove(idx);
                         current = 0;
@@ -174,12 +184,12 @@ async fn run(
 struct Args {
     #[structopt(help = "Path to configuration file")]
     #[cfg_attr(
-        target_os = "linux",
-        structopt(default_value = "/etc/rkvm/server.toml")
+    target_os = "linux",
+    structopt(default_value = "/etc/rkvm/server.toml")
     )]
     #[cfg_attr(
-        target_os = "windows",
-        structopt(default_value = "C:/rkvm/server.toml")
+    target_os = "windows",
+    structopt(default_value = "C:/rkvm/server.toml")
     )]
     config_path: PathBuf,
 }

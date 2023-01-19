@@ -36,6 +36,10 @@ impl EventWriter {
         self.event_sender.send(event).unwrap();
         Ok(())
     }
+
+    pub fn notify(&mut self, message: String) -> Result<(), Error> {
+        Ok(())
+    }
 }
 
 const REPEAT_INTERVAL: Duration = Duration::from_millis(20);

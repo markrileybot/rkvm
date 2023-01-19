@@ -4,6 +4,7 @@ use crate::linux::glue::{self, input_event, libevdev, libevdev_uinput};
 use std::io::{Error, ErrorKind};
 use std::mem::MaybeUninit;
 use std::ops::RangeInclusive;
+use notify_rust::Notification;
 
 pub struct EventWriter {
     evdev: *mut libevdev,
@@ -49,6 +50,10 @@ impl EventWriter {
 
     pub async fn write(&mut self, event: Event) -> Result<(), Error> {
         self.write_raw(event.to_raw())
+    }
+
+    pub fn notify(&mut self, _message: String) -> Result<(), Error> {
+        Ok(())
     }
 
     pub(crate) fn write_raw(&mut self, event: input_event) -> Result<(), Error> {
