@@ -154,12 +154,12 @@ async fn run(
                         clients.remove(idx);
                         current = 0;
                     } else {
-                        log::warn!("Send client {} {:?}", current, event);
+                        log::debug!("Send client {} {:?}", current, event);
                         continue;
                     }
                 }
 
-                log::warn!("Send manager {:?}", event);
+                log::debug!("Send manager {:?}", event);
                 manager.write(event).await?;
             }
             sender = client_receiver.recv() => {
