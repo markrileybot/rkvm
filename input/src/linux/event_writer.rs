@@ -93,7 +93,7 @@ unsafe impl Send for EventWriter {}
 const TYPES: &[(u32, &[RangeInclusive<u32>])] = &[
     (glue::EV_SYN, &[glue::SYN_REPORT..=glue::SYN_REPORT]),
     (glue::EV_REL, &[0..=glue::REL_MAX]),
-    (glue::EV_KEY, &[0..=glue::KEY_MAX]),
+    (glue::EV_KEY, &[0..=/*glue::KEY_MAX*/565]),
 ];
 
 unsafe fn setup_evdev(evdev: *mut libevdev) -> Result<(), Error> {

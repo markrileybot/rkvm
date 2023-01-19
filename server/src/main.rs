@@ -56,6 +56,7 @@ where
 async fn run(
     listen_address: SocketAddr,
     switch_keys: &HashSet<Key>,
+    kill_keys: &HashSet<Key>,
     identity_path: &Path,
     identity_password: &str,
 ) -> Result<Infallible, Error> {
@@ -110,42 +111,55 @@ async fn run(
     let mut clients: Vec<UnboundedSender<Event>> = Vec::new();
     let mut current = 0;
     let mut manager = EventManager::new().await?;
-    let mut key_states: HashMap<_, _> = switch_keys
+    let mut switch_key_states: HashMap<_, _> = switch_keys
         .iter()
-        .copied()
-        .map(|key| (key, false))
+        .map(|key| (key.clone(), false))
+        .collect();
+    let mut kill_key_states: HashMap<_, _> = kill_keys
+        .iter()
+        .map(|key| (key.clone(), false))
         .collect();
     loop {
         tokio::select! {
             event = manager.read() => {
                 let event = event?;
                 if let Event::Key { direction, kind: KeyKind::Key(key) } = event {
-                    if let Some(state) = key_states.get_mut(&key) {
+                    if let Some(state) = switch_key_states.get_mut(&key) {
+                        *state = direction == Direction::Down;
+                    } else if let Some(state) = kill_key_states.get_mut(&key) {
                         *state = direction == Direction::Down;
                     }
                 }
 
                 // TODO: This won't work with multiple keys.
-                if key_states.iter().filter(|(_, state)| **state).count() == key_states.len() {
-                    for state in key_states.values_mut() {
+                if switch_key_states.iter().filter(|(_, state)| **state).count() == switch_key_states.len() {
+                    for state in switch_key_states.values_mut() {
                         *state = false;
                     }
 
                     current = (current + 1) % (clients.len() + 1);
                     log::info!("Switching to client {}", current);
                     continue;
+                } else if kill_key_states.iter().filter(|(_, state)| **state).count() == kill_key_states.len() {
+                    for state in kill_key_states.values_mut() {
+                        *state = false;
+                    }
+                    return Err(Error::msg("Kilt"));
                 }
 
                 if current != 0 {
                     let idx = current - 1;
-                    if clients[idx].send(event).is_ok() {
+                    if let Err(e) = clients[idx].send(event) {
+                        log::warn!("{:?}.  Removing client {}", e, current);
+                        clients.remove(idx);
+                        current = 0;
+                    } else {
+                        log::warn!("Send client {} {:?}", current, event);
                         continue;
                     }
-
-                    clients.remove(idx);
-                    current = 0;
                 }
 
+                log::warn!("Send manager {:?}", event);
                 manager.write(event).await?;
             }
             sender = client_receiver.recv() => {
@@ -195,7 +209,7 @@ async fn main() {
     };
 
     tokio::select! {
-        result = run(config.listen_address, &config.switch_keys, &config.identity_path, &config.identity_password) => {
+        result = run(config.listen_address, &config.switch_keys, &config.kill_keys, &config.identity_path, &config.identity_password) => {
             if let Err(err) = result {
                 log::error!("Error: {:#}", err);
                 process::exit(1);

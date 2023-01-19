@@ -9,6 +9,7 @@ use std::path::PathBuf;
 pub struct Config {
     pub listen_address: SocketAddr,
     pub switch_keys: HashSet<Key>,
+    pub kill_keys: HashSet<Key>,
     pub identity_path: PathBuf,
     #[serde(default)]
     pub identity_password: String,
