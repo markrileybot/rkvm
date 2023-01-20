@@ -111,13 +111,15 @@ unsafe fn setup_evdev(evdev: *mut libevdev) -> Result<(), Error> {
     for (r#type, codes) in TYPES.iter().copied() {
         let ret = glue::libevdev_enable_event_type(evdev, r#type);
         if ret < 0 {
-            return Err(Error::from_raw_os_error(-ret));
+            return Err(Error::new(Error::from_raw_os_error(ret).kind(),
+                                  format!("Failed to enable event type {} ({})", r#type, ret)));
         }
 
         for code in codes.iter().cloned().flatten() {
             let ret = glue::libevdev_enable_event_code(evdev, r#type, code, std::ptr::null_mut());
             if ret < 0 {
-                return Err(Error::from_raw_os_error(-ret));
+                return Err(Error::new(Error::from_raw_os_error(ret).kind(),
+                                      format!("Failed to enable event type {} code {} ({})", r#type, code, ret)));
             }
         }
     }

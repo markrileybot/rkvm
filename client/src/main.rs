@@ -64,6 +64,7 @@ async fn run(server: &str, port: u16, certificate_path: &Path) -> Result<Infalli
                 log::debug!("Notify {:?}", msg);
                 writer.notify(msg)?;
             }
+            _ => {}
         }
     }
 }

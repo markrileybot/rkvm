@@ -64,5 +64,8 @@ pub enum Message {
     Event(Event),
     // Sent only to keep the connection alive.
     KeepAlive,
+    // Sent send a message from the server to pop up on the client
     Notify(String),
+    // Exchange from the client
+    Hello(String),
 }
