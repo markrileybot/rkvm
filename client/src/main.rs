@@ -8,6 +8,7 @@ use net::{self, Message, PROTOCOL_VERSION};
 use std::convert::Infallible;
 use std::path::{Path, PathBuf};
 use std::process;
+use gethostname::gethostname;
 use structopt::StructOpt;
 use tokio::fs;
 use tokio::io::BufReader;
@@ -16,6 +17,8 @@ use tokio::time;
 use tokio_native_tls::native_tls::{Certificate, TlsConnector};
 
 async fn run(server: &str, port: u16, certificate_path: &Path) -> Result<Infallible, Error> {
+    let mut writer = EventWriter::new().await?;
+
     let certificate = fs::read(certificate_path)
         .await
         .context("Failed to read certificate")?;
@@ -49,20 +52,19 @@ async fn run(server: &str, port: u16, certificate_path: &Path) -> Result<Infalli
         ));
     }
 
-    let mut writer = EventWriter::new().await?;
+    net::write_message(&mut stream, &Message::Hello(gethostname().to_str().unwrap().to_string())).await?;
+
     loop {
         let message = time::timeout(net::MESSAGE_TIMEOUT, net::read_message(&mut stream))
             .await
             .context("Read timed out")??;
         match message {
             Message::Event(event) => {
-                log::debug!("Handle {:?}", event);
                 writer.write(event).await?
             },
             Message::KeepAlive => {}
             Message::Notify(msg) => {
-                log::debug!("Notify {:?}", msg);
-                writer.notify(msg)?;
+                writer.notify(msg);
             }
             _ => {}
         }

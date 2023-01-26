@@ -7,6 +7,7 @@ use std::mem::MaybeUninit;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::AsRawFd;
 use std::path::Path;
+use nix::libc;
 use tokio::io::unix::AsyncFd;
 
 pub(crate) struct EventReader {

@@ -6,10 +6,12 @@ use inotify::{Inotify, WatchMask};
 use std::io::{Error, ErrorKind};
 use std::path::Path;
 use std::time::Duration;
+use nix::libc;
 use tokio::fs;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot::{self, Receiver};
 use tokio::time;
+use crate::linux::privileges::drop_privileges;
 
 const EVENT_PATH: &str = "/dev/input";
 
@@ -38,7 +40,7 @@ impl EventManager {
             spawn_reader(&entry.path(), event_sender.clone()).await?;
         }
 
-        let writer = EventWriter::new().await?;
+        let writer = EventWriter::new_no_drop().await?;
 
         // Sleep for a while to give userspace time to register our devices.
         time::sleep(Duration::from_secs(1)).await;
@@ -50,6 +52,7 @@ impl EventManager {
             }
         });
 
+        drop_privileges();
         Ok(EventManager {
             writer,
             event_receiver,
@@ -72,8 +75,8 @@ impl EventManager {
         self.writer.write(event).await
     }
 
-    pub fn notify(&mut self, message: String) -> Result<(), Error> {
-        self.writer.notify(message)
+    pub fn notify(&mut self, message: String) {
+        self.writer.notify(message);
     }
 }
 

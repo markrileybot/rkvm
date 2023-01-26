@@ -3,7 +3,7 @@ mod config;
 use anyhow::{Context, Error};
 use config::Config;
 use input::{Direction, Event, EventManager, Key, KeyKind};
-use log::LevelFilter;
+use log::{error, LevelFilter};
 use net::{self, Message, PROTOCOL_VERSION};
 use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
@@ -18,6 +18,12 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::time;
 use tokio_native_tls::native_tls::{Identity, TlsAcceptor};
 
+#[derive(Clone, Debug)]
+struct Client {
+    name: String,
+    sender: UnboundedSender<Message>,
+}
+
 async fn handle_connection<T>(
     mut stream: T,
     mut receiver: UnboundedReceiver<Message>,
@@ -25,17 +31,6 @@ async fn handle_connection<T>(
     where
         T: AsyncRead + AsyncWrite + Unpin,
 {
-    net::write_version(&mut stream, PROTOCOL_VERSION).await?;
-
-    let version = net::read_version(&mut stream).await?;
-    if version != PROTOCOL_VERSION {
-        return Err(anyhow::anyhow!(
-            "Incompatible protocol version (got {}, expecting {})",
-            version,
-            PROTOCOL_VERSION
-        ));
-    }
-
     loop {
         // Send a keep alive message in intervals of half of the timeout just to be on the safe side.
         let message = match time::timeout(net::MESSAGE_TIMEOUT / 2, receiver.recv()).await {
@@ -83,7 +78,7 @@ async fn run(
                 }
             };
 
-            let stream = match acceptor.accept(stream).await {
+            let mut stream = match acceptor.accept(stream).await {
                 Ok(stream) => stream,
                 Err(err) => {
                     log::error!("{}: TLS error: {}", address, err);
@@ -91,24 +86,54 @@ async fn run(
                 }
             };
 
+            if let Err(e) = net::write_version(&mut stream, PROTOCOL_VERSION).await {
+                error!("{}: Failed to write version: {}", address, e);
+                continue;
+            }
+
+            match net::read_version(&mut stream).await {
+                Ok(version) => {
+                    if version != PROTOCOL_VERSION {
+                        error!("Incompatible protocol version (got {}, expecting {})", version, PROTOCOL_VERSION);
+                        continue;
+                    }
+                }
+                Err(e) => {
+                    error!("{}: Failed to read version: {}", address, e);
+                    continue;
+                }
+            }
+
+            let client_name = match net::read_message(&mut stream).await {
+                Ok(Message::Hello(name)) => name,
+                Ok(message) => {
+                    error!("{}: Failed to read name.  Read {:?}", address, message);
+                    continue;
+                }
+                Err(e) => {
+                    error!("{}: Failed to read name: {}", address, e);
+                    continue;
+                }
+            };
+
             let (sender, receiver) = mpsc::unbounded_channel();
-            if client_sender.send(Ok(sender)).is_err() {
+            if client_sender.send(Ok(Client {name: client_name.clone(), sender})).is_err() {
                 return;
             }
 
             tokio::spawn(async move {
-                log::info!("{}: connected", address);
+                log::info!("{} {}: connected", client_name, address);
                 let message = handle_connection(stream, receiver)
                     .await
                     .err()
                     .map(|err| format!(" ({})", err))
                     .unwrap_or_else(String::new);
-                log::info!("{}: disconnected{}", address, message);
+                log::info!("{} {}: disconnected{}", client_name, address, message);
             });
         }
     });
 
-    let mut clients: Vec<UnboundedSender<Message>> = Vec::new();
+    let mut clients: Vec<Client> = Vec::new();
     let mut current = 0;
     let mut manager = EventManager::new().await?;
     let mut switch_key_states: HashMap<_, _> = switch_keys
@@ -141,11 +166,13 @@ async fn run(
                     log::info!("Switching to client {}", current);
 
                     if current == 0 {
-                        manager.notify("I'm over here now!".to_string())?;
+                        manager.notify("I'm over here now!".to_string());
                     } else {
-                        if let Err(e) = clients[current - 1].send(Message::Notify("I'm over here now!".to_string())) {
+                        let idx = current - 1;
+                        if let Err(e) = clients[idx].sender.send(Message::Notify("I'm over here now!".to_string())) {
                             log::warn!("{:?}", e);
                         } else {
+                            manager.notify(format!("Switched to {}", clients[idx].name).to_string());
                             log::debug!("Notify client {}", current);
                         }
                     }
@@ -159,7 +186,7 @@ async fn run(
 
                 if current != 0 {
                     let idx = current - 1;
-                    if let Err(e) = clients[idx].send(Message::Event(event)) {
+                    if let Err(e) = clients[idx].sender.send(Message::Event(event)) {
                         log::warn!("{:?}.  Removing client {}", e, current);
                         clients.remove(idx);
                         current = 0;

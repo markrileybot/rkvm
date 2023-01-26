@@ -1,10 +1,13 @@
-use crate::event::Event;
-use crate::linux::device_id;
-use crate::linux::glue::{self, input_event, libevdev, libevdev_uinput};
 use std::io::{Error, ErrorKind};
 use std::mem::MaybeUninit;
 use std::ops::RangeInclusive;
+
+use log::debug;
 use notify_rust::Notification;
+
+use crate::event::Event;
+use crate::linux::{device_id, privileges};
+use crate::linux::glue::{self, input_event, libevdev, libevdev_uinput};
 
 pub struct EventWriter {
     evdev: *mut libevdev,
@@ -13,10 +16,18 @@ pub struct EventWriter {
 
 impl EventWriter {
     pub async fn new() -> Result<Self, Error> {
-        tokio::task::spawn_blocking(Self::new_sync).await?
+        tokio::task::spawn_blocking(|| -> Result<Self, Error> {
+            return Self::new_sync(true);
+        }).await?
     }
 
-    fn new_sync() -> Result<Self, Error> {
+    pub async fn new_no_drop() -> Result<Self, Error> {
+        tokio::task::spawn_blocking(|| -> Result<Self, Error> {
+            return Self::new_sync(false);
+        }).await?
+    }
+
+    fn new_sync(drop_privileges: bool) -> Result<Self, Error> {
         let evdev = unsafe { glue::libevdev_new() };
         if evdev.is_null() {
             return Err(Error::new(ErrorKind::Other, "Failed to create device"));
@@ -41,10 +52,16 @@ impl EventWriter {
 
         if ret < 0 {
             unsafe { glue::libevdev_free(evdev) };
-            return Err(Error::from_raw_os_error(-ret));
+            return Err(Error::new(Error::from_raw_os_error(-ret).kind(),
+                                  format!("Failed to create from device ({})", ret)));
         }
 
         let uinput = unsafe { uinput.assume_init() };
+
+        // ok now maybe drop
+        if drop_privileges {
+            privileges::drop_privileges();
+        }
         Ok(Self { evdev, uinput })
     }
 
@@ -52,8 +69,13 @@ impl EventWriter {
         self.write_raw(event.to_raw())
     }
 
-    pub fn notify(&mut self, _message: String) -> Result<(), Error> {
-        Ok(())
+    pub fn notify(&mut self, message: String) {
+        if let Err(e) = Notification::new()
+            .summary("RKVM")
+            .body(message.as_str())
+            .show() {
+            debug!("Failed to notify {}", e);
+        }
     }
 
     pub(crate) fn write_raw(&mut self, event: input_event) -> Result<(), Error> {
@@ -111,14 +133,14 @@ unsafe fn setup_evdev(evdev: *mut libevdev) -> Result<(), Error> {
     for (r#type, codes) in TYPES.iter().copied() {
         let ret = glue::libevdev_enable_event_type(evdev, r#type);
         if ret < 0 {
-            return Err(Error::new(Error::from_raw_os_error(ret).kind(),
+            return Err(Error::new(Error::from_raw_os_error(-ret).kind(),
                                   format!("Failed to enable event type {} ({})", r#type, ret)));
         }
 
         for code in codes.iter().cloned().flatten() {
             let ret = glue::libevdev_enable_event_code(evdev, r#type, code, std::ptr::null_mut());
             if ret < 0 {
-                return Err(Error::new(Error::from_raw_os_error(ret).kind(),
+                return Err(Error::new(Error::from_raw_os_error(-ret).kind(),
                                       format!("Failed to enable event type {} code {} ({})", r#type, code, ret)));
             }
         }
