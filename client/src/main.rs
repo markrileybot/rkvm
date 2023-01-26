@@ -1,20 +1,23 @@
-mod config;
-
-use anyhow::{Context, Error};
-use config::Config;
-use input::EventWriter;
-use log::LevelFilter;
-use net::{self, Message, PROTOCOL_VERSION};
 use std::convert::Infallible;
 use std::path::{Path, PathBuf};
 use std::process;
+
+use anyhow::{Context, Error};
+use arboard::Clipboard;
 use gethostname::gethostname;
+use log::{LevelFilter, warn};
 use structopt::StructOpt;
 use tokio::fs;
 use tokio::io::BufReader;
 use tokio::net::TcpStream;
 use tokio::time;
 use tokio_native_tls::native_tls::{Certificate, TlsConnector};
+
+use config::Config;
+use input::EventWriter;
+use net::{self, Message, PROTOCOL_VERSION};
+
+mod config;
 
 async fn run(server: &str, port: u16, certificate_path: &Path) -> Result<Infallible, Error> {
     let mut writer = EventWriter::new().await?;
@@ -65,6 +68,22 @@ async fn run(server: &str, port: u16, certificate_path: &Path) -> Result<Infalli
             Message::KeepAlive => {}
             Message::Notify(msg) => {
                 writer.notify(msg);
+            }
+            Message::GetClipboardData => {
+                if let Ok(mut clipboard) = Clipboard::new() {
+                    if let Ok(text) = clipboard.get_text() {
+                        if let Err(e) = net::write_message(&mut stream, &Message::SetClipboardData(text)).await {
+                            warn!("Failed to send clip {}", e);
+                        }
+                    }
+                }
+            }
+            Message::SetClipboardData(text) => {
+                if let Ok(mut clipboard) = Clipboard::new() {
+                    if let Err(e) = clipboard.set_text(text) {
+                        warn!("Failed to recv clip {}", e);
+                    }
+                }
             }
             _ => {}
         }

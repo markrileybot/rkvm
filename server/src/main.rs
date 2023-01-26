@@ -1,15 +1,12 @@
-mod config;
-
-use anyhow::{Context, Error};
-use config::Config;
-use input::{Direction, Event, EventManager, Key, KeyKind};
-use log::{error, LevelFilter};
-use net::{self, Message, PROTOCOL_VERSION};
 use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process;
+
+use anyhow::{Context, Error};
+use arboard::Clipboard;
+use log::{error, LevelFilter, warn};
 use structopt::StructOpt;
 use tokio::fs;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -17,6 +14,12 @@ use tokio::net::TcpListener;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::time;
 use tokio_native_tls::native_tls::{Identity, TlsAcceptor};
+
+use config::Config;
+use input::{Direction, Event, EventManager, Key, KeyKind};
+use net::{self, Message, PROTOCOL_VERSION};
+
+mod config;
 
 #[derive(Clone, Debug)]
 struct Client {
@@ -27,24 +30,28 @@ struct Client {
 async fn handle_connection<T>(
     mut stream: T,
     mut receiver: UnboundedReceiver<Message>,
+    sender: UnboundedSender<Message>,
 ) -> Result<(), Error>
     where
         T: AsyncRead + AsyncWrite + Unpin,
 {
     loop {
-        // Send a keep alive message in intervals of half of the timeout just to be on the safe side.
-        let message = match time::timeout(net::MESSAGE_TIMEOUT / 2, receiver.recv()).await {
-            Ok(Some(message)) => message,
-            Ok(None) => return Ok(()),
-            Err(_) => Message::KeepAlive,
-        };
+        tokio::select! {
+            out_message = time::timeout(net::MESSAGE_TIMEOUT / 2, receiver.recv()) => {
+                let message = match out_message {
+                    Ok(Some(message)) => message,
+                    Ok(None) => return Ok(()),
+                    Err(_) => Message::KeepAlive,
+                };
 
-        time::timeout(
-            net::MESSAGE_TIMEOUT,
-            net::write_message(&mut stream, &message),
-        )
-            .await
-            .context("Write timeout")??;
+                time::timeout(net::MESSAGE_TIMEOUT, net::write_message(&mut stream, &message))
+                    .await
+                    .context("Write timeout")??;
+            }
+            in_message = net::read_message(&mut stream) => {
+                sender.send(in_message?)?;
+            }
+        }
     }
 }
 
@@ -68,6 +75,7 @@ async fn run(
     log::info!("Listening on {}", listen_address);
 
     let (client_sender, mut client_receiver) = mpsc::unbounded_channel();
+    let (in_sender, mut in_receiver) = mpsc::unbounded_channel();
     tokio::spawn(async move {
         loop {
             let (stream, address) = match listener.accept().await {
@@ -116,14 +124,15 @@ async fn run(
                 }
             };
 
-            let (sender, receiver) = mpsc::unbounded_channel();
-            if client_sender.send(Ok(Client {name: client_name.clone(), sender})).is_err() {
+            let (out_sender, out_receiver) = mpsc::unbounded_channel();
+            if client_sender.send(Ok(Client {name: client_name.clone(), sender: out_sender})).is_err() {
                 return;
             }
 
+            let message_sender = in_sender.clone();
             tokio::spawn(async move {
                 log::info!("{} {}: connected", client_name, address);
-                let message = handle_connection(stream, receiver)
+                let message = handle_connection(stream, out_receiver, message_sender)
                     .await
                     .err()
                     .map(|err| format!(" ({})", err))
@@ -146,6 +155,27 @@ async fn run(
         .collect();
     loop {
         tokio::select! {
+            message = in_receiver.recv() => {
+                if let Some(message) = message {
+                    match message {
+                        Message::SetClipboardData(text) => {
+                            if current == 0 {
+                                if let Ok(mut clipboard) = Clipboard::new() {
+                                    if let Err(e) = clipboard.set_text(text) {
+                                        warn!("Failed to recv clip {}", e);
+                                    }
+                                }
+                            } else {
+                                let idx = current - 1;
+                                if let Err(e) = clients[idx].sender.send(Message::SetClipboardData(text)) {
+                                    log::warn!("{:?}", e);
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
             event = manager.read() => {
                 let event = event?;
                 if let Event::Key { direction, kind: KeyKind::Key(key) } = event {
@@ -162,6 +192,7 @@ async fn run(
                         *state = false;
                     }
 
+                    let previous = current;
                     current = (current + 1) % (clients.len() + 1);
                     log::info!("Switching to client {}", current);
 
@@ -174,6 +205,22 @@ async fn run(
                         } else {
                             manager.notify(format!("Switched to {}", clients[idx].name).to_string());
                             log::debug!("Notify client {}", current);
+                        }
+                    }
+
+                    if previous == 0 {
+                        if let Ok(mut clipboard) = Clipboard::new() {
+                            if let Ok(text) = clipboard.get_text() {
+                                let idx = current - 1;
+                                if let Err(e) = clients[idx].sender.send(Message::SetClipboardData(text)) {
+                                    log::warn!("{:?}", e);
+                                }
+                            }
+                        }
+                    } else {
+                        let idx = current - 1;
+                        if let Err(e) = clients[idx].sender.send(Message::GetClipboardData) {
+                            log::warn!("{:?}", e);
                         }
                     }
                     continue;

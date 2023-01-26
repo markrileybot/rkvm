@@ -68,4 +68,8 @@ pub enum Message {
     Notify(String),
     // Exchange from the client
     Hello(String),
+    // Request to get the clipboard content from the active client
+    GetClipboardData,
+    // set clipboard content
+    SetClipboardData(String),
 }
