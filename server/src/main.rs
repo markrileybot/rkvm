@@ -16,7 +16,7 @@ use tokio::time;
 use tokio_native_tls::native_tls::{Identity, TlsAcceptor};
 
 use config::Config;
-use input::{Direction, Event, EventManager, Key, KeyKind};
+use input::{clipboard, Direction, Event, EventManager, Key, KeyKind};
 use net::{self, Message, PROTOCOL_VERSION};
 
 mod config;
@@ -160,11 +160,7 @@ async fn run(
                     match message {
                         Message::SetClipboardData(text) => {
                             if current == 0 {
-                                if let Ok(mut clipboard) = Clipboard::new() {
-                                    if let Err(e) = clipboard.set_text(text) {
-                                        warn!("Failed to recv clip {}", e);
-                                    }
-                                }
+                                clipboard::set_text(text);
                             } else {
                                 let idx = current - 1;
                                 if let Err(e) = clients[idx].sender.send(Message::SetClipboardData(text)) {
@@ -194,7 +190,7 @@ async fn run(
 
                     let previous = current;
                     current = (current + 1) % (clients.len() + 1);
-                    log::info!("Switching to client {}", current);
+                    log::info!("Switching to client {} from {}", current, previous);
 
                     if current == 0 {
                         manager.notify("I'm over here now!".to_string());
@@ -209,16 +205,14 @@ async fn run(
                     }
 
                     if previous == 0 {
-                        if let Ok(mut clipboard) = Clipboard::new() {
-                            if let Ok(text) = clipboard.get_text() {
-                                let idx = current - 1;
-                                if let Err(e) = clients[idx].sender.send(Message::SetClipboardData(text)) {
-                                    log::warn!("{:?}", e);
-                                }
+                        if let Some(text) = clipboard::get_text() {
+                            let idx = current - 1;
+                            if let Err(e) = clients[idx].sender.send(Message::SetClipboardData(text)) {
+                                log::warn!("{:?}", e);
                             }
                         }
                     } else {
-                        let idx = current - 1;
+                        let idx = previous - 1;
                         if let Err(e) = clients[idx].sender.send(Message::GetClipboardData) {
                             log::warn!("{:?}", e);
                         }

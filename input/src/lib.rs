@@ -5,6 +5,7 @@ mod linux;
 
 #[cfg(target_os = "windows")]
 mod windows;
+pub mod clipboard;
 
 #[cfg(target_os = "linux")]
 pub use linux::{EventManager, EventWriter};

@@ -14,7 +14,7 @@ use tokio::time;
 use tokio_native_tls::native_tls::{Certificate, TlsConnector};
 
 use config::Config;
-use input::EventWriter;
+use input::{clipboard, EventWriter};
 use net::{self, Message, PROTOCOL_VERSION};
 
 mod config;
@@ -70,20 +70,15 @@ async fn run(server: &str, port: u16, certificate_path: &Path) -> Result<Infalli
                 writer.notify(msg);
             }
             Message::GetClipboardData => {
-                if let Ok(mut clipboard) = Clipboard::new() {
-                    if let Ok(text) = clipboard.get_text() {
-                        if let Err(e) = net::write_message(&mut stream, &Message::SetClipboardData(text)).await {
-                            warn!("Failed to send clip {}", e);
-                        }
+                if let Some(text) = clipboard::get_text() {
+                    warn!("Send clip text to server {}", text);
+                    if let Err(e) = net::write_message(&mut stream, &Message::SetClipboardData(text)).await {
+                        warn!("Failed to send clip {}", e);
                     }
                 }
             }
             Message::SetClipboardData(text) => {
-                if let Ok(mut clipboard) = Clipboard::new() {
-                    if let Err(e) = clipboard.set_text(text) {
-                        warn!("Failed to recv clip {}", e);
-                    }
-                }
+                clipboard::set_text(text);
             }
             _ => {}
         }
