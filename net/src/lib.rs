@@ -31,10 +31,9 @@ where
     R: AsyncRead + Unpin,
 {
     let length = {
-        let mut bytes = [0; 1];
+        let mut bytes = [0; 4];
         reader.read_exact(&mut bytes).await?;
-
-        bytes[0]
+        u32::from_le_bytes(bytes)
     };
 
     let mut data = vec![0; length as usize];
@@ -49,7 +48,7 @@ where
 {
     let data =
         bincode::serialize(&message).map_err(|err| Error::new(ErrorKind::InvalidInput, err))?;
-    let length: u8 = data
+    let length: u32 = data
         .len()
         .try_into()
         .map_err(|_| Error::new(ErrorKind::InvalidInput, "Serialized data is too large"))?;
