@@ -5,8 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process;
 
 use anyhow::{Context, Error};
-use arboard::Clipboard;
-use log::{error, LevelFilter, warn};
+use log::{error, LevelFilter};
 use structopt::StructOpt;
 use tokio::fs;
 use tokio::io::{AsyncRead, AsyncWrite};

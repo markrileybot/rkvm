@@ -1,7 +1,7 @@
 use std::env;
 
 use libc::{gid_t, uid_t};
-use log::warn;
+use log::{info, warn};
 use nix::libc;
 use nix::unistd::{Gid, Group, Uid, User};
 
@@ -15,59 +15,72 @@ fn get_sudo_group() -> Option<Group> {
                             return group;
                         }
                         Err(e) => {
-                            warn!("Failed to find group for {}.  Will not drop privileges.  {}", gid, e);
+                            warn!("Failed to find group for {}.  {}", gid, e);
                         }
                     }
                 }
                 Err(e) => {
-                    warn!("Failed to parse gid from {}.  Will not drop privileges.  {}", gid, e);
+                    warn!("Failed to parse gid from {}.  {}", gid, e);
                 }
             }
         }
         Err(e) => {
-            warn!("Failed to read sudo gid.  Will not drop privileges.  {}", e);
+            warn!("Failed to read sudo gid.  {}", e);
+        }
+    }
+    None
+}
+
+fn get_user(uid: String) -> Option<User> {
+    match uid.parse::<uid_t>() {
+        Ok(uid) => {
+            match User::from_uid(Uid::from(uid)) {
+                Ok(user) => {
+                    return user;
+                }
+                Err(e) => {
+                    warn!("Failed to find user for {}.  {}", uid, e);
+                }
+            }
+        }
+        Err(e) => {
+            warn!("Failed to parse uid from {}.  {}", uid, e);
         }
     }
     None
 }
 
 fn get_sudo_user() -> Option<User> {
-    match env::var("SUDO_UID") {
+    return match env::var("SUDO_UID") {
         Ok(uid) => {
-            match uid.parse::<uid_t>() {
+            get_user(uid)
+        }
+        Err(e) => {
+            info!("Failed to read sudo uid.  {}.  Trying polkit...", e);
+            match env::var("PKEXEC_UID") {
                 Ok(uid) => {
-                    match User::from_uid(Uid::from(uid)) {
-                        Ok(user) => {
-                            return user;
-                        }
-                        Err(e) => {
-                            warn!("Failed to find user for {}.  Will not drop privileges.  {}", uid, e);
-                        }
-                    }
+                    get_user(uid)
                 }
                 Err(e) => {
-                    warn!("Failed to parse uid from {}.  Will not drop privileges.  {}", uid, e);
+                    warn!("Failed to read polkit uid.  {}", e);
+                    None
                 }
             }
         }
-        Err(e) => {
-            warn!("Failed to read sudo uid.  Will not drop privileges.  {}", e);
-        }
     }
-    None
 }
 
 pub(crate) fn drop_privileges() {
     if let Some(group) = get_sudo_group() {
-        if let Some(user) = get_sudo_user() {
-            warn!("Dropping to {:?}:{:?}", group, user);
-            if let Err(e) = nix::unistd::setgid(group.gid) {
-                warn!("Failed to set gid {}", e);
-            } else {
-                if let Err(e) = nix::unistd::setuid(user.uid) {
-                    warn!("Failed to set uid {}", e);
-                }
-            }
+        info!("Dropping to group {:?}", group.name);
+        if let Err(e) = nix::unistd::setgid(group.gid) {
+            warn!("Failed to set gid {}", e);
+        }
+    }
+    if let Some(user) = get_sudo_user() {
+        info!("Dropping to user {:?}", user.name);
+        if let Err(e) = nix::unistd::setuid(user.uid) {
+            warn!("Failed to set uid {}", e);
         }
     }
 }

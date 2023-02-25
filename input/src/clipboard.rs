@@ -1,16 +1,12 @@
-use arboard::{Clipboard, Error};
-use log::warn;
+use arboard::Clipboard;
+use log::{info, warn};
 
 pub fn set_text(text: String) {
+    info!("Set clip text to {}", text);
     match Clipboard::new() {
         Ok(mut clipboard) => {
-            match clipboard.set_text(text.clone()) {
-                Ok(_) => {
-                    warn!("Set clip text to {}", text);
-                }
-                Err(e) => {
-                    warn!("Failed to get clipboard text {}", e);
-                }
+            if let Err(e) = clipboard.set_text(text.clone()) {
+                warn!("Failed to get clipboard text {}", e);
             }
         }
         Err(e) => {
@@ -24,7 +20,7 @@ pub fn get_text() -> Option<String> {
         Ok(mut clipboard) => {
             match clipboard.get_text() {
                 Ok(text) => {
-                    warn!("Got clip text to {}", text);
+                    info!("Got clip text to {}", text);
                     return Some(text);
                 }
                 Err(e) => {

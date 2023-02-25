@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 use std::process;
 
 use anyhow::{Context, Error};
-use arboard::Clipboard;
 use gethostname::gethostname;
 use log::{LevelFilter, warn};
 use structopt::StructOpt;
@@ -71,7 +70,6 @@ async fn run(server: &str, port: u16, certificate_path: &Path) -> Result<Infalli
             }
             Message::GetClipboardData => {
                 if let Some(text) = clipboard::get_text() {
-                    warn!("Send clip text to server {}", text);
                     if let Err(e) = net::write_message(&mut stream, &Message::SetClipboardData(text)).await {
                         warn!("Failed to send clip {}", e);
                     }
